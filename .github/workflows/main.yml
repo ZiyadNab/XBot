@@ -1,0 +1,57 @@
+name: Auto Deploy FNBRMENA X Corp Bot
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install sshpass
+        run: sudo apt-get install -y sshpass
+
+      - name: Create TAR file
+        run: |
+          tar -cvf FNBRMENA-X-Bot.tar App Dockerfile
+
+      - name: Transfer TAR file to VM
+        run: |
+          sshpass -p "${{ secrets.VM_PASSWORD }}" scp -o StrictHostKeyChecking=no FNBRMENA-X-Bot.tar.tar ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/tmp/fnbrmena_x_bot_repo/
+
+      - name: Deploy and Build Docker image on VM
+        run: |
+          sshpass -p "${{ secrets.VM_PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << EOF
+            cd /tmp/fnbrmena_x_bot_repo
+            tar -xf FNBRMENA-X-Bot.tar.tar
+            rm -rf FNBRMENA-X-Bot.tar.tar
+
+            # Determine the correct Docker image and container names
+            image_name="fnbrmena_x_bot_image"
+            container_name="FNBRMENA_X_BOT_CONTAINER"
+
+            docker rm -f \${container_name} || true
+            docker rmi \${image_name} || true
+            docker build --no-cache -t \${image_name}:latest .
+            
+            docker run -d --name \${container_name} \
+              --restart always \
+              -e type="${{ secrets.FIREBASE_TYPE }}" \
+              -e project_id="${{ secrets.FIREBASE_PROJECT_ID }}" \
+              -e private_key_id="${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" \
+              -e private_key="${{ secrets.FIREBASE_PRIVATE_KEY }}" \
+              -e client_email="${{ secrets.FIREBASE_CLIENT_EMAIL }}" \
+              -e client_id="${{ secrets.FIREBASE_CLIENT_ID }}" \
+              -e auth_uri="${{ secrets.FIREBASE_AUTH_URI }}" \
+              -e token_uri="${{ secrets.FIREBASE_TOKEN_URI }}" \
+              -e auth_provider_x509_cert_url="${{ secrets.FIREBASE_AUTH_PROVIDER_X509_CERT_URL }}" \
+              -e client_x509_cert_url="${{ secrets.FIREBASE_CLIENT_X509_CERT_URL }}" \
+              -e universe_domain="${{ secrets.FIREBASE_UNIVERSE_DOMAIN }}" \
+              \${image_name}:latest
+            rm -rf *
+          EOF
